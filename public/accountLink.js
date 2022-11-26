@@ -39,8 +39,9 @@ document.addEventListener('DOMContentLoaded',()=>{
   
            const urlSearch = new URLSearchParams(location.search);
            const state= urlSearch.get('state');
-           console.log("state:",state);
-           console.log("res:",result);
+           //console.log("state:",state);
+           //console.log("res:",result);
+           
   
            const user = result.user;
            const accesstoken=result._tokenResponse.oauthAccessToken;
@@ -51,8 +52,8 @@ document.addEventListener('DOMContentLoaded',()=>{
            console.log("AT:",accesstoken);
            console.log("RT:",refreshtoken)
            console.log("user",user);
-           const redirectApp="https://oauth-redirect.googleusercontent.com/r/mowa-e57baw#access_token="+accesstoken+"&token_type=bearer&state="+state;
-           window.location.replace(redirectApp); 
+           //const redirectApp="https://oauth-redirect.googleusercontent.com/r/mowa-e57baw#access_token="+accesstoken+"&token_type=bearer&state="+state;
+           //window.location.replace(redirectApp); 
     }).catch((error)=>{
            console.log(error);
            console.log("모와 회원이 아닙니다.");
