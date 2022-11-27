@@ -1,15 +1,13 @@
 'use strict';
 
-//import {dialogflow,SignIn,Suggestions} from 'actions-on-google';
-//import functions from 'firebase-functions';
-//import request from 'request-promise-native'; 
 
-const {dialogflow,SignIn,Suggestions} = require('actions-on-google');
+const {dialogflow,SignIn,Suggestions, Conversation} = require('actions-on-google');
 const functions = require('firebase-functions');
 const request =require('request-promise-native');
+require("dotenv").config();
 
-const basicURL="https://www.googleapis.com/oauth2/v1/userinfo?access_token=";
-
+//const googleURL="https://www.googleapis.com/oauth2/v1/userinfo?access_token=";
+const mowaURL="http://3.37.161.170:8000/"
 
 const app = dialogflow({
     clientId: process.env.CLIENT_ID,
@@ -18,161 +16,140 @@ const app = dialogflow({
 
 app.intent('Default Welcome Intent', async (conv) => {
   // Do things
-    const token=conv.user.raw.accessToken;
-    console.log("token:",token);
-    if(token===undefined){
-      return conv.add("안녕하세요 모와입니다. 현재 임시 사용자 모드입니다.");
-      //토큰이 부여되지 않은 상태, unlink상태이기에 사용자를 guest로 인식한다.
+    const {payload}=conv.user.profile;
+    if(payload){
+      conv.add(`환영합니다. ${payload.name}님. 모와입니다. `);
     }
     else{
-      //토큰이 부여된 상태, 토큰으로 사용자 정보에 접근하며, 토큰이 만료된 것과 아닌 것을 구분해야 한다. 
-      const user= await getProfile(token,conv);
-      if(user){
-      //토큰이 유효한 상태다.
-      const user_name=conv.data.user_name;
-      conv.add(`환영합니다. ${user_name}님 모와입니다.`);
-      }
-      else{
-        conv.add("토큰이 만료되었습니다. 모와에게 로그아웃이라고 말해주세요.");
-        conv.add(new Suggestions("로그아웃"));
-      }
-    }
+      conv.add("안녕하세요. 모와입니다. 현재 임시 사용자 모드입니다. 기능을 사용하기 위해 로그인을 진행 해주세요.");
+      conv.add(new Suggestions("로그인"));
 
+    }
 });
 
 app.intent('sign in', async (conv)=>{
-  const token=conv.user.raw.accessToken;
-  const Valid=conv.data.user_Validation;
-  if(token===undefined){
-    conv.ask(new SignIn());
-  }
-  else if(Valid){
-    conv.ask("이미 로그인이 완료된 상태입니다.");
+  const {payload}=conv.user.profile;
+  if(payload){
+    conv.add("이미 로그인이 되어있습니다.");
   }
   else{
-    conv.add("토큰이 만료되었습니다. 모와에게 로그아웃이라고 말해주세요.");
-    conv.add(new Suggestions("로그아웃"));
+    conv.ask(new SignIn(""));
   }
+});
+
+app.intent('sign in - yes', async (conv,params,signin)=>{
+  if(signin.status==='OK'){
+    const {payload}=conv.user.profile;
+    conv.add(`환영합니다. ${payload.name}님`);
+  }
+  else{
+    conv.add("오류가 발생했습니다.");
+  }
+});
+
+app.intent('sign in - no',conv=>{
+  conv.add('로그인을 수행하지 않습니다.');
 });
 
 app.intent('test', conv=>{
-      conv.ask("테스트용 인텐트입니다.");
-  
+      conv.add("테스트용 인텐트입니다.");
   });
 
 app.intent('show profile', async (conv)=>{
-  const token=conv.user.raw.accessToken;
-  const Valid=conv.data.user_Validation;
-  if(token===undefined){
+
+  const {payload}=conv.user.profile;
+
+  if(payload){
+    conv.add(`회원님의 이름은 ${payload.name}, 이메일은 ${payload.email} 입니다.`);
+    const activityArrays=await getUserActivity(payload.email);
+    if(activityArrays){
+      //conv.add('회원님의 활동 통계 정보를 가져오는데 성공하였습니다.');
+      console.log("활동정보:",activityArrays);
+      const theLastest=activityArrays[activityArrays.length-1];
+      console.log("가장 최신 정보",theLastest);
+      conv.add(`${theLastest.date}기준 지금까지 보안 경고 횟수 ${theLastest.warning_count}회, 활동 횟수 ${theLastest.activity_count}회, 스피커 사용 횟수 ${theLastest.speaker_count}회, 넘어짐 횟수 ${theLastest.warning_count}회 입니다.`);
+      
+    }
+    else{
+      conv.add('회원님의 활동 통계 정보를 가져오는데 실패하였습니다. 현재 스피커의 구글 계정과 안드로이드 모와 앱에서 로그인한 구글 계정과 동일한지 확인해주세요');
+    }
+  }
+  else{
     conv.ask("로그인이 필요한 기능입니다!");
     conv.ask(new Suggestions("로그인"));
   }
-  else if(Valid===true){
-    const user_name=conv.data.user_name;
-    const user_email=conv.data.user_email;
-    conv.add(`회원님의 이름은 ${user_name}, 아이디는 ${user_email}입니다.`);
-  }
-  else{
-    //토큰이 부여됐으며 유효한 상태, 바로 사용자 정보 가져오면 된다.
-    conv.ask("토큰이 만료되었습니다. 계정 연결을 다시 진행해야 합니다. 이를 위해 모와에게 로그아웃이라고 말해주세요.");
-    conv.ask(new Suggestions("로그아웃"));
-  }
+
   
 });
+
+
 
 app.intent('Default Fallback Intent', conv=>{
     conv.add("명령을 이해하지 못했어요");
 });
 
 
-app.intent('security off', async conv=>{
-    const token=conv.user.raw.accessToken;
-    const Valid=conv.data.user_Validation;
-    if(token===undefined){
-      conv.ask("로그인이 필요한 기능입니다!");
-      conv.ask(new Suggestions("로그인"));
-    }
-    else if(Valid===true){
-      const URL="https://541a-210-102-180-18.jp.ngrok.io/mowa_test/";
-      const user_email=conv.data.user_email;
-      const finalURL=URL+user_email+"/";
-      const option={
-          uri:finalURL,
-          method:'PUT',
-          body:{
-            "UserEmail":user_email,
-            "Security":false
-          },
-          json:true
-        }
-      request(option).then(result=>{
-        console.log(result);
-        conv.add("보안 기능 종료");
-        }).catch(error=>{
-          console.log(error);
-        conv.add("오류가 발생했습니다.");
-        });
-    }
-    else{
-      conv.ask("토큰이 만료되었습니다. 계정 연결을 다시 진행해야 합니다. 이를 위해 모와에게 로그아웃이라고 말해주세요.");
-      conv.ask(new Suggestions("로그아웃"));
-    }
-});
+app.intent('security off', async (conv)=>{
 
+  const {payload}=conv.user.profile;
 
-app.intent('security on',async conv=>{
-    const token=conv.user.raw.accessToken;
-    const Valid=conv.data.user_Validation;
-    if(token===undefined){
-      conv.ask("로그인이 필요한 기능입니다!");
-      conv.ask(new Suggestions("로그인"));
-    }
-    else if(Valid===true){
-      const URL="https://541a-210-102-180-18.jp.ngrok.io/mowa_test/";
-      const user_email=conv.data.user_email+"/";
-      const finalURL=URL+user_email;
-      const option={
-          uri:finalURL,
-          method:'PUT',
-          body:{
-            "UserEmail":user_email,
-            "Security":true
-          },
-          json:true
-      }
-      request(option).then(result=>{
-        console.log(result);
-        conv.add("보안 기능 작동");
-        }).catch(error=>{
-          console.log(error);
-        conv.add("오류가 발생했습니다.");
-        });
-
-    }
-    else{
-        conv.ask("토큰이 만료되었습니다. 계정 연결을 다시 진행해야 합니다. 이를 위해 모와에게 로그아웃이라고 말해주세요.");
-        conv.ask(new Suggestions("로그아웃"));
-      } 
-})
-
-app.intent('logout', async conv =>{
-  const token=conv.user.raw.accessToken;
-  if(token===undefined){
-    return conv.add("로그아웃은 로그인 상태에서만 가능합니다.");
+  if(payload){
+    conv.add("보안 끄기");
   }
   else{
-    const user= await getProfile(token,conv);
-    if(user){
-    conv.add(`로그아웃은 사용자 정보가 만료되었을 때 진행하는 것을 권장합니다.`);
-    }
-    else{
-      conv.add("토큰이 만료되었습니다. 모와에게 로그아웃이라고 말해주세요.");
-      conv.add(new Suggestions("로그아웃"));
-    }
+    conv.ask("로그인이 필요한 기능입니다!");
+    conv.ask(new Suggestions("로그인"));
   }
+  
 });
 
 
+app.intent('security on',async (conv)=>{
+
+    const {payload}=conv.user.profile;
+    if(payload){
+      conv.add("보안 켜기");
+    }
+    else{
+      conv.ask("로그인이 필요한 기능입니다!");
+      conv.ask(new Suggestions("로그인"));
+    }
+});
+
+app.intent('logout',  conv =>{
+  const {payload}=conv.user.profile;
+
+  if(payload){
+    conv.add("로그아웃이 가능합니다. ");
+  }
+  else{
+    conv.ask("현재 로그인 되지 않은 상태입니다. ");
+    conv.ask(new Suggestions("로그인"));
+  }
+
+});
+
+
+//mowaURL="http://3.37.161.170:8000/"
+function getUserActivity(userId){
+  const targetURL=mowaURL+"activity/"+userId+"/";
+
+  return new Promise((resolve,reject)=>{
+      
+    request.get({uri:targetURL}).then(result=>{
+      const activities=JSON.parse(result);
+      for(let i in activities){
+        console.log("activity:",activities[i]);
+      }
+      resolve(activities)
+    }).catch(error=>{
+      console.log("error:",error);
+      reject(false);
+    })
+
+  });
+
+}
 
 function getProfile(token,conv){
     const finalURL=basicURL+token;
