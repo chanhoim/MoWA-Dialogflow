@@ -129,7 +129,7 @@ app.intent('logout',  conv =>{
       text: `로그아웃`, 
       buttons: new Button({
         title: '로그아웃',
-        url: 'https://developers.google.com/assistant/df-asdk/rich-responses'
+        url: 'https://myaccount.google.com/permissions?continue=https%3A%2F%2Fmyaccount.google.com%2Fsecurity'
       }),
       display: 'CROPPED',
     }));
