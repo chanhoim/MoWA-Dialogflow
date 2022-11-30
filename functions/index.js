@@ -1,13 +1,12 @@
 'use strict';
 
 
-const {dialogflow,SignIn,Suggestions, Conversation} = require('actions-on-google');
+const {dialogflow,SignIn,Suggestions, BasicCard, Button} = require('actions-on-google');
 const functions = require('firebase-functions');
 const request =require('request-promise-native');
 require("dotenv").config();
 
-//const googleURL="https://www.googleapis.com/oauth2/v1/userinfo?access_token=";
-const mowaURL="http://3.37.161.170:8000/"
+const mowaURL=process.env.MOWA_URL;
 
 const app = dialogflow({
     clientId: process.env.CLIENT_ID,
@@ -38,6 +37,7 @@ app.intent('sign in', async (conv)=>{
 });
 
 app.intent('sign in - yes', async (conv,params,signin)=>{
+
   if(signin.status==='OK'){
     const {payload}=conv.user.profile;
     conv.add(`환영합니다. ${payload.name}님`);
@@ -95,6 +95,7 @@ app.intent('security off', async (conv)=>{
 
   if(payload){
     conv.add("보안 끄기");
+    //moaw api로 put request 추가 예정
   }
   else{
     conv.ask("로그인이 필요한 기능입니다!");
@@ -109,6 +110,7 @@ app.intent('security on',async (conv)=>{
     const {payload}=conv.user.profile;
     if(payload){
       conv.add("보안 켜기");
+      //moaw api로 put request 추가 예정
     }
     else{
       conv.ask("로그인이 필요한 기능입니다!");
@@ -120,7 +122,18 @@ app.intent('logout',  conv =>{
   const {payload}=conv.user.profile;
 
   if(payload){
-    conv.add("로그아웃이 가능합니다. ");
+    if(!conv.screen){           //raspberry pi case
+       return conv.add("현재 장치에선 로그아웃을 진행할 수 없으며 안드로이드 모와 앱에선 명령을 수행하실 수 있습니다.");
+    }
+    conv.ask(new BasicCard({
+      text: `로그아웃`, 
+      buttons: new Button({
+        title: '로그아웃',
+        url: 'https://developers.google.com/assistant/df-asdk/rich-responses'
+      }),
+      display: 'CROPPED',
+    }));
+    
   }
   else{
     conv.ask("현재 로그인 되지 않은 상태입니다. ");
@@ -130,7 +143,8 @@ app.intent('logout',  conv =>{
 });
 
 
-//mowaURL="http://3.37.161.170:8000/"
+
+
 function getUserActivity(userId){
   const targetURL=mowaURL+"activity/"+userId+"/";
 
@@ -138,9 +152,10 @@ function getUserActivity(userId){
       
     request.get({uri:targetURL}).then(result=>{
       const activities=JSON.parse(result);
+      /*
       for(let i in activities){
         console.log("activity:",activities[i]);
-      }
+      }*/
       resolve(activities)
     }).catch(error=>{
       console.log("error:",error);
