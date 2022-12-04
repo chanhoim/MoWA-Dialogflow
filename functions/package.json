@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "actions-on-google": "^2.2.0",
+    "crypto-js": "^4.1.1",
     "dotenv": "^16.0.3",
     "firebase": "^9.9.4",
     "firebase-admin": "^11.0.1",

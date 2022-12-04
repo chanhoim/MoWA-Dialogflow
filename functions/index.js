@@ -1,12 +1,14 @@
 'use strict';
 
 
-const {dialogflow,SignIn,Suggestions, BasicCard, Button} = require('actions-on-google');
+const {dialogflow,SignIn,Suggestions, BasicCard, Button, Image, Conversation} = require('actions-on-google');
 const functions = require('firebase-functions');
-const request =require('request-promise-native');
+const request = require('request-promise-native');
+const CryptoJS = require('crypto-js');
 require("dotenv").config();
 
 const mowaURL=process.env.MOWA_URL;
+const RecommendThreshhold=10;
 
 const app = dialogflow({
     clientId: process.env.CLIENT_ID,
@@ -18,6 +20,29 @@ app.intent('Default Welcome Intent', async (conv) => {
     const {payload}=conv.user.profile;
     if(payload){
       conv.add(`환영합니다. ${payload.name}님. 모와입니다. `);
+      if(!conv.screen){
+        return
+      }
+      const activityArrays=await getUserActivity(payload.email);
+      if(activityArrays){
+        //conv.add('회원님의 활동 통계 정보를 가져오는데 성공하였습니다.');
+        //console.log("활동정보:",activityArrays);
+        //const theLastest=activityArrays[activityArrays.length-1];
+        //console.log("가장 최신 정보",theLastest);
+        // conv.add(`${theLastest.date}기준 지금까지 보안 경고 횟수 ${theLastest.warning_count}회, 활동 횟수 ${theLastest.activity_count}회, 스피커 사용 횟수 ${theLastest.speaker_count}회, 넘어짐 횟수 ${theLastest.warning_count}회 입니다.`);
+        if(decisionForRecommend(activityArrays)){
+          //recommand Exercise Video
+          conv.add("요즘 활동이 부족하십니다. 운동 영상을 시청하시면서 따라해보시는 것을 추천합니다!");
+          await recommendExerciseVideo(conv);
+        }
+        else{
+          //don't recommand 
+          conv.add("활동을 충분히 잘하고 계십니다!");
+        }
+      }
+      else{
+        conv.add('회원님의 활동 통계 정보를 가져오는데 실패하였습니다. 현재 스피커의 구글 계정과 안드로이드 모와 앱에서 로그인한 구글 계정과 동일한지 확인해주세요');
+      }
     }
     else{
       conv.add("안녕하세요. 모와입니다. 현재 임시 사용자 모드입니다. 기능을 사용하기 위해 로그인을 진행 해주세요.");
@@ -61,18 +86,6 @@ app.intent('show profile', async (conv)=>{
 
   if(payload){
     conv.add(`회원님의 이름은 ${payload.name}, 이메일은 ${payload.email} 입니다.`);
-    const activityArrays=await getUserActivity(payload.email);
-    if(activityArrays){
-      //conv.add('회원님의 활동 통계 정보를 가져오는데 성공하였습니다.');
-      console.log("활동정보:",activityArrays);
-      const theLastest=activityArrays[activityArrays.length-1];
-      console.log("가장 최신 정보",theLastest);
-      conv.add(`${theLastest.date}기준 지금까지 보안 경고 횟수 ${theLastest.warning_count}회, 활동 횟수 ${theLastest.activity_count}회, 스피커 사용 횟수 ${theLastest.speaker_count}회, 넘어짐 횟수 ${theLastest.warning_count}회 입니다.`);
-      
-    }
-    else{
-      conv.add('회원님의 활동 통계 정보를 가져오는데 실패하였습니다. 현재 스피커의 구글 계정과 안드로이드 모와 앱에서 로그인한 구글 계정과 동일한지 확인해주세요');
-    }
   }
   else{
     conv.ask("로그인이 필요한 기능입니다!");
@@ -96,6 +109,7 @@ app.intent('security off', async (conv)=>{
   if(payload){
     conv.add("보안 끄기");
     //moaw api로 put request 추가 예정
+
   }
   else{
     conv.ask("로그인이 필요한 기능입니다!");
@@ -125,6 +139,7 @@ app.intent('logout',  conv =>{
     if(!conv.screen){           //raspberry pi case
        return conv.add("현재 장치에선 로그아웃을 진행할 수 없으며 안드로이드 모와 앱에선 명령을 수행하실 수 있습니다.");
     }
+    conv.add("로그아웃은 위 링크로 들어가 모와 앱의 접근 권한을 해제하시면 됩니다.");
     conv.ask(new BasicCard({
       text: `로그아웃`, 
       buttons: new Button({
@@ -142,6 +157,27 @@ app.intent('logout',  conv =>{
 
 });
 
+app.intent('emergency', conv=>{
+  const {payload}=conv.user.profile;
+  if(payload){
+    conv.ask("현재 상황을 말씀해주세요.");
+  }
+  else{
+    conv.ask("로그인이 필요한 기능입니다!");
+    conv.ask(new Suggestions("로그인"));
+    conv.close();
+  }
+});
+
+app.intent('emergency_situation', async conv=>{
+ 
+  const {payload}=conv.user.profile;
+  const name=payload.name;
+  const situation=conv.input.raw;
+  console.log("situation:",situation);
+  await sendMessage(conv,name,situation)
+  
+});
 
 
 
@@ -166,35 +202,162 @@ function getUserActivity(userId){
 
 }
 
-function getProfile(token,conv){
-    const finalURL=basicURL+token;
-    return new Promise((resolve,reject)=>{
+function decisionForRecommend(activities){
+  const todayInd=activities.length-1;
+  const todaysActivityCount=activities[todayInd].activity_count;
+  if(todayInd>0){
+    const yesterdayActivityCount=activities[todayInd-1].activity_count;
+    const Increment=todaysActivityCount-yesterdayActivityCount;
+    if(Increment < RecommendThreshhold){
+      return true;
+    }
+    else{
+      return false;
+    }
+  }
+  else{
+    return false;
+  }
+}
 
-        request.get({uri:finalURL}).then(result=>{
-        const user=JSON.parse(result);
-        console.log(user);
-        if(user){
-          conv.data.user_email=user.email;
-          conv.data.user_name=user.name;
-          conv.data.user_Validation=true;
-          resolve(user);
-        }
-        else {
-          conv.data.user_Validation=false;
-          conv.add("유저 정보를 가져오는대 실패하였습니다.");
-          conv.user.raw.accessToken="";
-          reject(Valid);
-        }
-      }).catch(error=>{
-         console.log(error);
-         conv.add("토큰이 만료되었습니다. 다시 로그인 해주시기 바랍니다.");
-         conv.add(new Suggestions("로그인"));
-         conv.user.raw.accessToken="";
-         //토큰 만료. 
-         conv.data.user_Validation=false;
-         reject(Valid);
-      });
+function recommendExerciseVideo(conv){
+  const PLAYLIST_ID=process.env.MOWA_YOUTUBE_LIST_ID;
+  const API_KEY=process.env.YOUTUBE_API_KEY;
+  const youtubeURL="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&status=&playlistId="+PLAYLIST_ID+"&key="+API_KEY;
+
+
+  if (!conv.screen) {
+    conv.ask('현재 장치에선 운동 영상을 보여드릴 수 없습니다. 안드로이드 모와 앱을 이용해주세요.');
+    return;
+  }
+
+  return new Promise((resolve,reject)=>{
+      
+    request.get({uri:youtubeURL}).then(result=>{
+      const parsed=JSON.parse(result);
+      const videoArray=parsed.items;
+      const videoCounts=parsed.pageInfo.totalResults;
+      const targetIndex=Math.floor(Math.random()*(videoCounts-1));
+
+      const videoId=videoArray[targetIndex].snippet.resourceId.videoId;
+      const videoName=videoArray[targetIndex].snippet.title;
+      const channelName=videoArray[targetIndex].snippet.videoOwnerChannelTitle;
+      const videoThumbnailsURL=videoArray[targetIndex].snippet.thumbnails.high.url;
+
+      console.log(`target index=${targetIndex}, videoId=${videoId} channelName=${channelName}, thumbnailsURL==${videoThumbnailsURL}`);
+
+      const videoURL="https://www.youtube.com/watch?v="+videoId;
+   
+      conv.ask(new BasicCard({
+        subtitle: channelName,
+        title: videoName,
+        buttons: new Button({
+          title: '시청하기',
+          url: videoURL,
+        }),
+        image: new Image({
+          url: videoThumbnailsURL,
+        }),
+        display: 'CROPPED',
+      }));
+
+      //parsing  -> Basic Card Response
+
+
+
+      resolve(true)
+    }).catch(error=>{
+      console.log("error:",error);
+      conv.add("오류가 발생했습니다.")
+      reject(false);
     });
+
+  });
+
+}
+
+function sendMessage(conv,userName,userSituation){
+  const date=Date.now().toString();
+
+  const recipientNumber=process.env.RECIPIENT_TEST_PHONE_NUMBER;
+  const senderNumber=process.env.SENDER_TEST_PHONE_NUMBER;
+
+  const serviceId=process.env.NCP_SERVICE_ID;
+  const secretKey=process.env.NCP_SECRET_KEY;
+  const accessKey=process.env.NCP_ACCESS_KEY;
+
+  const apiURL=`https://sens.apigw.ntruss.com/sms/v2/services/${serviceId}/messages`;
+  const apiURL2=`/sms/v2/services/${serviceId}/messages`;
+  const method = "POST";
+  const space = " ";
+  const newLine = "\n";
+  
+  const hmac=CryptoJS.algo.HMAC.create(CryptoJS.algo.SHA256, secretKey);
+  hmac.update(method);
+  hmac.update(space);
+  hmac.update(apiURL2);
+  hmac.update(newLine);
+  hmac.update(date);
+  hmac.update(newLine);
+  hmac.update(accessKey);
+  const hash = hmac.finalize();
+  const signature = hash.toString(CryptoJS.enc.Base64);
+
+  return new Promise((resolve,reject)=>{
+    request({
+      method: method,
+      json: true,
+      uri:apiURL,
+      headers:{
+        "Contenc-type": "application/json; charset=utf-8",
+        "x-ncp-iam-access-key": accessKey,
+        "x-ncp-apigw-timestamp": date,
+        "x-ncp-apigw-signature-v2": signature,
+      },
+      body:{
+        type: "SMS",
+        countryCode: "82",
+        from: senderNumber,
+        content: `${userName}님으로부터 긴급 연락이 도착했습니다.\n 현재 상황:${userSituation}`,
+        messages: [
+          { to: `${recipientNumber}`, },],
+      }
+    }).then(result=>{
+      console.log(result);
+      conv.add("긴급 요청을 전송했습니다.");
+      resolve(true);
+    }).catch(error=>{
+      console.log(error);
+      conv.add("오류가 발생했습니다.");
+      reject(false);
+    });
+  });  
+
+}
+ 
+
+function toggleSecurityMode(userId,flag){
+  //mowa API에 따라 수정 예정
+  const finalURL=undefined;
+  const option={
+      uri:finalURL,
+      method:'PUT',
+      body:{
+        "UserEmail":userId,
+        "Security":flag
+      },
+      json:true
+    }
+  return new Promise((resolve,reject)=>{
+    request(option).then(result=>{
+      resolve(true);
+      }).catch(error=>{
+      console.log(error);
+      conv.add("오류가 발생했습니다.");
+      reject(false);
+      });
+  });
+
 }
 
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest(app);
