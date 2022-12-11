@@ -80,6 +80,8 @@ app.intent('test', conv=>{
       conv.add("테스트용 인텐트입니다.");
   });
 
+
+
 app.intent('show profile', async (conv)=>{
 
   const {payload}=conv.user.profile;
@@ -107,9 +109,13 @@ app.intent('security off', async (conv)=>{
   const {payload}=conv.user.profile;
 
   if(payload){
-    conv.add("보안 끄기");
-    //moaw api로 put request 추가 예정
-
+    const information=await getUserInformaiton(payload.email);
+    if(await toggleSecurityMode(payload.email,information,"False")){
+      conv.add("보안 모드가 꺼졌습니다.")
+    }
+    else{
+      conv.add("오류가 발생했습니다.")
+    }
   }
   else{
     conv.ask("로그인이 필요한 기능입니다!");
@@ -123,8 +129,13 @@ app.intent('security on',async (conv)=>{
 
     const {payload}=conv.user.profile;
     if(payload){
-      conv.add("보안 켜기");
-      //moaw api로 put request 추가 예정
+      const information=await getUserInformaiton(payload.email);
+      if(await toggleSecurityMode(payload.email,information,"True")){
+        conv.add("보안 모드가 켜졌습니다.")
+      }
+      else{
+        conv.add("오류가 발생했습니다.")
+      }
     }
     else{
       conv.ask("로그인이 필요한 기능입니다!");
@@ -178,6 +189,24 @@ app.intent('emergency_situation', async conv=>{
   await sendMessage(conv,name,situation)
   
 });
+
+
+function getUserInformaiton(userId){
+  const targetURL=mowaURL+"user/"+userId+"/";
+
+  return new Promise((resolve,reject)=>{
+      
+    request.get({uri:targetURL}).then(result=>{
+      const Informations=JSON.parse(result);
+      resolve(Informations)
+    }).catch(error=>{
+      console.log("error:",error);
+      reject(false);
+    })
+
+  });
+  
+}
 
 
 
@@ -336,15 +365,18 @@ function sendMessage(conv,userName,userSituation){
 }
  
 
-function toggleSecurityMode(userId,flag){
+function toggleSecurityMode(userId,information,flag){
   //mowa API에 따라 수정 예정
-  const finalURL=undefined;
+  const targetURL=mowaURL+"user/"+userId+"/";
   const option={
-      uri:finalURL,
+      uri:targetURL,
       method:'PUT',
       body:{
-        "UserEmail":userId,
-        "Security":flag
+        "user_id" : information.user_id,
+        "serial_number" : information.serial_number,
+        "mac_address" : information.mac_address,
+        "mode" : flag,
+        "status" : information.status
       },
       json:true
     }
