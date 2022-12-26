@@ -16,59 +16,60 @@ const app = dialogflow({
 
 
 app.intent('Default Welcome Intent', async (conv) => {
-  // Do things
-    const {payload}=conv.user.profile;
-    if(payload){
-      conv.add(`환영합니다. ${payload.name}님. 모와입니다. `);
-      if(!conv.screen){
-        return
-      }
-      const activityArrays=await getUserActivity(payload.email);
-      if(activityArrays){
-        //conv.add('회원님의 활동 통계 정보를 가져오는데 성공하였습니다.');
-        //console.log("활동정보:",activityArrays);
-        //const theLastest=activityArrays[activityArrays.length-1];
-        //console.log("가장 최신 정보",theLastest);
-        // conv.add(`${theLastest.date}기준 지금까지 보안 경고 횟수 ${theLastest.warning_count}회, 활동 횟수 ${theLastest.activity_count}회, 스피커 사용 횟수 ${theLastest.speaker_count}회, 넘어짐 횟수 ${theLastest.warning_count}회 입니다.`);
-        if(decisionForRecommend(activityArrays)){
-          //recommand Exercise Video
-          conv.add("요즘 활동이 부족하십니다. 운동 영상을 시청하시면서 따라해보시는 것을 추천합니다!");
-          await recommendExerciseVideo(conv);
+  if(fromAndroid(conv)===true){
+    const request=conv.request
+    return conv.add(`안녕하세요 ${request.name}님. 모와입니다.`);
+  }
+  const {payload}=conv.user.profile;
+  if(!payload){
+    conv.add("안녕하세요. 모와입니다. 현재 임시 사용자 모드입니다. 기능을 사용하기 위해 로그인을 진행 해주세요.");
+    conv.add(new Suggestions("로그인"));
+  }
+  else{
+    conv.add(`환영합니다. ${payload.name}님. 모와입니다. `);
+    if(!conv.screen){
+      return
+    }
+    const activityArrays=await getUserActivity(payload.email);
+    if(activityArrays){
+      //conv.add('회원님의 활동 통계 정보를 가져오는데 성공하였습니다.');
+      //console.log("활동정보:",activityArrays);
+      //const theLastest=activityArrays[activityArrays.length-1];
+      //console.log("가장 최신 정보",theLastest);
+      // conv.add(`${theLastest.date}기준 지금까지 보안 경고 횟수 ${theLastest.warning_count}회, 활동 횟수 ${theLastest.activity_count}회, 스피커 사용 횟수 ${theLastest.speaker_count}회, 넘어짐 횟수 ${theLastest.warning_count}회 입니다.`);
+      if(decisionForRecommend(activityArrays)){
+        //recommand Exercise Video
+        conv.add("요즘 활동이 부족하십니다. 운동 영상을 시청하시면서 따라해보시는 것을 추천합니다!");
+        await recommendExerciseVideo(conv);
         }
-        else{
-          //don't recommand 
-          conv.add("활동을 충분히 잘하고 계십니다!");
-        }
-      }
       else{
-        conv.add('회원님의 활동 통계 정보를 가져오는데 실패하였습니다. 현재 스피커의 구글 계정과 안드로이드 모와 앱에서 로그인한 구글 계정과 동일한지 확인해주세요');
-      }
+        //don't recommand 
+        conv.add("활동을 충분히 잘하고 계십니다!");
+        }
     }
     else{
-      conv.add("안녕하세요. 모와입니다. 현재 임시 사용자 모드입니다. 기능을 사용하기 위해 로그인을 진행 해주세요.");
-      conv.add(new Suggestions("로그인"));
-
+      conv.add('회원님의 활동 통계 정보를 가져오는데 실패하였습니다. 현재 스피커의 구글 계정과 안드로이드 모와 앱에서 로그인한 구글 계정과 동일한지 확인해주세요');
+    }
     }
 });
 
 app.intent('sign in', async (conv)=>{
   const {payload}=conv.user.profile;
-  if(payload){
-    conv.add("이미 로그인이 되어있습니다.");
+  if(!payload && fromAndroid(conv)===false){
+    conv.ask(new SignIn(""));
   }
   else{
-    conv.ask(new SignIn(""));
+     conv.add("이미 로그인이 되어있습니다.");
   }
 });
 
 app.intent('sign in - yes', async (conv,params,signin)=>{
-
-  if(signin.status==='OK'){
-    const {payload}=conv.user.profile;
-    conv.add(`환영합니다. ${payload.name}님`);
+  if(signin.status!=='OK'){
+    conv.add("오류가 발생했습니다.");
   }
   else{
-    conv.add("오류가 발생했습니다.");
+    const {payload}=conv.user.profile;
+    conv.add(`환영합니다. ${payload.name}님`);
   }
 });
 
@@ -77,78 +78,104 @@ app.intent('sign in - no',conv=>{
 });
 
 app.intent('test', conv=>{
-      conv.add("테스트용 인텐트입니다.");
-  });
+  conv.add("테스트용 인텐트입니다.");
+});
 
 
 
 app.intent('show profile', async (conv)=>{
-
+  if(fromAndroid(conv)===true){
+    const request=conv.request
+    return conv.add(`회원님의 이름은 ${request.name}, 이메일은 ${request.email}입니다.`);
+  }
   const {payload}=conv.user.profile;
-
-  if(payload){
-    conv.add(`회원님의 이름은 ${payload.name}, 이메일은 ${payload.email} 입니다.`);
+  if(!payload){
+    conv.ask("로그인이 필요한 기능입니다!");
+    conv.ask(new Suggestions("로그인"));    
   }
   else{
-    conv.ask("로그인이 필요한 기능입니다!");
-    conv.ask(new Suggestions("로그인"));
-  }
-
-  
+    conv.add(`회원님의 이름은 ${payload.name}, 이메일은 ${payload.email} 입니다.`);
+  } 
 });
 
 
 
 app.intent('Default Fallback Intent', conv=>{
-    conv.add("명령을 이해하지 못했어요");
+  conv.add("명령을 이해하지 못했어요");
 });
 
 
 app.intent('security off', async (conv)=>{
-
-  const {payload}=conv.user.profile;
-
-  if(payload){
-    const information=await getUserInformaiton(payload.email);
-    if(await toggleSecurityMode(payload.email,information,"False")){
+  if(fromAndroid(conv)===true){
+    const id=conv.request.email;
+    const information=await getUserInformaiton(id);
+    if(await toggleSecurityMode(id,information,"False")){
       conv.add("보안 모드가 꺼졌습니다.")
     }
     else{
       conv.add("오류가 발생했습니다.")
     }
   }
-  else{
+  const {payload}=conv.user.profile;
+  if(!payload){
     conv.ask("로그인이 필요한 기능입니다!");
     conv.ask(new Suggestions("로그인"));
   }
-  
+  else{
+    const id=payload.email;
+    const information=await getUserInformaiton(id);
+    if(await toggleSecurityMode(id,information,"False")){
+      conv.add("보안 모드가 꺼졌습니다.")
+    }
+    else{
+      conv.add("오류가 발생했습니다.")
+    }
+
+  }
 });
 
 
 app.intent('security on',async (conv)=>{
-
-    const {payload}=conv.user.profile;
-    if(payload){
-      const information=await getUserInformaiton(payload.email);
-      if(await toggleSecurityMode(payload.email,information,"True")){
-        conv.add("보안 모드가 켜졌습니다.")
-      }
-      else{
-        conv.add("오류가 발생했습니다.")
-      }
+  if(fromAndroid(conv)===true){
+    const id=conv.request.email;
+    const information=await getUserInformaiton(id);
+    if(await toggleSecurityMode(id,information,"True")){
+      conv.add("보안 모드가 켜졌습니다.")
     }
     else{
-      conv.ask("로그인이 필요한 기능입니다!");
-      conv.ask(new Suggestions("로그인"));
+      conv.add("오류가 발생했습니다.")
     }
+  }
+  const {payload}=conv.user.profile;
+  if(!payload){
+    conv.ask("로그인이 필요한 기능입니다!");
+    conv.ask(new Suggestions("로그인"));
+  }
+  else{
+    const id=payload.email;
+    const information=await getUserInformaiton(id);
+    if(await toggleSecurityMode(id,information,"True")){
+      conv.add("보안 모드가 켜졌습니다.")
+    }
+    else{
+      conv.add("오류가 발생했습니다.")
+    }
+
+  }
 });
 
 app.intent('logout',  conv =>{
+  if(fromAndroid(conv)===true){
+    return conv.add("안드로이드에선 로그아웃이 필요하지 않습니다.")
+  }
   const {payload}=conv.user.profile;
-
-  if(payload){
+  if(!payload){
+    conv.ask("현재 로그인 되지 않은 상태입니다. ");
+    conv.ask(new Suggestions("로그인"));
+  }
+  else{
     if(!conv.screen){           //raspberry pi case
-       return conv.add("현재 장치에선 로그아웃을 진행할 수 없으며 안드로이드 모와 앱에선 명령을 수행하실 수 있습니다.");
+      return conv.add("현재 장치에선 로그아웃을 진행할 수 없으며 안드로이드 모와 앱에선 명령을 수행하실 수 있습니다.");
     }
     conv.add("로그아웃은 위 링크로 들어가 모와 앱의 접근 권한을 해제하시면 됩니다.");
     conv.ask(new BasicCard({
@@ -159,43 +186,53 @@ app.intent('logout',  conv =>{
       }),
       display: 'CROPPED',
     }));
-    
-  }
-  else{
-    conv.ask("현재 로그인 되지 않은 상태입니다. ");
-    conv.ask(new Suggestions("로그인"));
   }
 
 });
 
 app.intent('emergency', conv=>{
   const {payload}=conv.user.profile;
-  if(payload){
-    conv.ask("현재 상황을 말씀해주세요.");
-  }
-  else{
+  if(!payload && fromAndroid(conv)===false){
     conv.ask("로그인이 필요한 기능입니다!");
     conv.ask(new Suggestions("로그인"));
     conv.close();
   }
+  else{
+    conv.ask("현재 상황을 말씀해주세요.");
+  }
 });
 
 app.intent('emergency_situation', async conv=>{
- 
-  const {payload}=conv.user.profile;
-  const name=payload.name;
-  const situation=conv.input.raw;
-  console.log("situation:",situation);
-  await sendMessage(conv,name,situation)
-  
+  if(fromAndroid(conv)===true){
+    const name=conv.request.name;
+    const situation=conv.input.raw;
+    await sendMessage(conv,name,situation)
+  }
+  else{
+    const {payload}=conv.user.profile;
+    const name=payload.name;
+    const situation=conv.input.raw;
+    await sendMessage(conv,name,situation)
+  }
 });
+
+app.intent('recommend video', async conv=>{
+  const {payload}=conv.user.profile;
+  if(!payload && fromAndroid(conv)===false){
+    conv.ask("로그인이 필요한 기능입니다!");
+    conv.ask(new Suggestions("로그인"));
+  }
+  else{
+    conv.add("다음 영상을 시청해주세요!");
+    await recommendExerciseVideo(conv);
+  }
+});
+
 
 
 function getUserInformaiton(userId){
   const targetURL=mowaURL+"user/"+userId+"/";
-
-  return new Promise((resolve,reject)=>{
-      
+  return new Promise((resolve,reject)=>{      
     request.get({uri:targetURL}).then(result=>{
       const Informations=JSON.parse(result);
       resolve(Informations)
@@ -203,18 +240,19 @@ function getUserInformaiton(userId){
       console.log("error:",error);
       reject(false);
     })
-
   });
-  
 }
 
-
+function fromAndroid(conv){
+  if (conv.request.from=="AndroidMoWA"){
+    return true;
+  }
+  else return false;
+}
 
 function getUserActivity(userId){
   const targetURL=mowaURL+"activity/"+userId+"/";
-
   return new Promise((resolve,reject)=>{
-      
     request.get({uri:targetURL}).then(result=>{
       const activities=JSON.parse(result);
       /*
@@ -226,9 +264,7 @@ function getUserActivity(userId){
       console.log("error:",error);
       reject(false);
     })
-
   });
-
 }
 
 function decisionForRecommend(activities){
@@ -255,7 +291,7 @@ function recommendExerciseVideo(conv){
   const youtubeURL="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&status=&playlistId="+PLAYLIST_ID+"&key="+API_KEY;
 
 
-  if (!conv.screen) {
+  if (!conv.screen && fromAndroid(conv)===false) {
     conv.ask('현재 장치에선 운동 영상을 보여드릴 수 없습니다. 안드로이드 모와 앱을 이용해주세요.');
     return;
   }
@@ -366,7 +402,6 @@ function sendMessage(conv,userName,userSituation){
  
 
 function toggleSecurityMode(userId,information,flag){
-  //mowa API에 따라 수정 예정
   const targetURL=mowaURL+"user/"+userId+"/";
   const option={
       uri:targetURL,
