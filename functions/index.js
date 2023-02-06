@@ -2,18 +2,66 @@
 
 
 const {dialogflow,SignIn,Suggestions, BasicCard, Button, Image, Conversation} = require('actions-on-google');
+const {Configuration, OpenAIApi} = require('openai');
+const admin = require('firebase-admin');
 const functions = require('firebase-functions');
 const request = require('request-promise-native');
 const CryptoJS = require('crypto-js');
+const { log } = require('firebase-functions/logger');
 require("dotenv").config();
 
 const mowaURL=process.env.MOWA_URL;
 const RecommendThreshhold=10;
 
+const configuration=new Configuration({
+  apiKey: process.env.OPENAI_API_KEY
+});
+const openai=new OpenAIApi(configuration);
+
 const app = dialogflow({
     clientId: process.env.CLIENT_ID,
     debug: true});
 
+
+/*
+admin.initializeApp();
+const auth = admin.auth();
+const db= admin.firestore();
+db.settings({timestampsInSnapshot:true});
+
+const dbs= {
+  user: db.collection('user')
+};
+
+
+app.middleware(async (conv) => {
+  const {email} = conv.user;
+  if (!conv.data.uid && email) {
+    try {
+      conv.data.uid = (await auth.getUserByEmail(email)).uid;
+    } catch (e) {
+      if (e.code !== 'auth/user-not-found') {
+        throw e;
+      }
+      // If the user is not found, create a new Firebase auth user
+      // using the email obtained from the Google Assistant
+      conv.data.uid = (await auth.createUser({email})).uid;
+    }
+  }
+  if (conv.data.uid) {
+    conv.user.ref = dbs.user.doc(conv.data.uid);
+  }
+});
+*/
+
+app.middleware(conv =>{
+  if(!conv.data.smallTalk){
+    console.log("명령 모드 상태");
+  }
+  else{
+    console.log("대화 모드 상태");
+  }
+});
 
 app.intent('Default Welcome Intent', async (conv) => {
   if(fromAndroid(conv)===true){
@@ -32,18 +80,12 @@ app.intent('Default Welcome Intent', async (conv) => {
     }
     const activityArrays=await getUserActivity(payload.email);
     if(activityArrays){
-      //conv.add('회원님의 활동 통계 정보를 가져오는데 성공하였습니다.');
-      //console.log("활동정보:",activityArrays);
-      //const theLastest=activityArrays[activityArrays.length-1];
-      //console.log("가장 최신 정보",theLastest);
-      // conv.add(`${theLastest.date}기준 지금까지 보안 경고 횟수 ${theLastest.warning_count}회, 활동 횟수 ${theLastest.activity_count}회, 스피커 사용 횟수 ${theLastest.speaker_count}회, 넘어짐 횟수 ${theLastest.warning_count}회 입니다.`);
       if(decisionForRecommend(activityArrays)){
         //recommand Exercise Video
         conv.add("요즘 활동이 부족하십니다. 운동 영상을 시청하시면서 따라해보시는 것을 추천합니다!");
         await recommendExerciseVideo(conv);
         }
-      else{
-        //don't recommand 
+      else{ 
         conv.add("활동을 충분히 잘하고 계십니다!");
         }
     }
@@ -65,20 +107,21 @@ app.intent('sign in', async (conv)=>{
 
 app.intent('sign in - yes', async (conv,params,signin)=>{
   if(signin.status!=='OK'){
-    conv.add("오류가 발생했습니다.");
+    return conv.close("오류가 발생했습니다.");
   }
-  else{
-    const {payload}=conv.user.profile;
-    conv.add(`환영합니다. ${payload.name}님`);
-  }
+  const {payload}=conv.user.profile;
+  conv.add(`환영합니다. ${payload.name}님`);
+  
 });
 
 app.intent('sign in - no',conv=>{
   conv.add('로그인을 수행하지 않습니다.');
 });
 
-app.intent('test', conv=>{
-  conv.add("테스트용 인텐트입니다.");
+app.intent('test', async conv=>{
+  const test= await getRespondeFromOpenAI("머리가 아파");
+  console.log("test:",test);
+  conv.add(`테스트 성공 ${test}`);
 });
 
 
@@ -100,8 +143,16 @@ app.intent('show profile', async (conv)=>{
 
 
 
-app.intent('Default Fallback Intent', conv=>{
-  conv.add("명령을 이해하지 못했어요");
+app.intent('Default Fallback Intent', async (conv)=>{
+  if(!conv.data.smallTalk){
+    return conv.add("명령을 이해하지 못했어요");
+  }
+  const question = conv.input.raw;
+  const answer= await getRespondeFromOpenAI(question);
+  if(!answer){
+    return conv.add("오류가 발생했습니다.");
+  }
+  conv.add(`${answer}`);
 });
 
 
@@ -223,9 +274,24 @@ app.intent('recommend video', async conv=>{
     conv.ask(new Suggestions("로그인"));
   }
   else{
-    conv.add("다음 영상을 시청해주세요!");
     await recommendExerciseVideo(conv);
   }
+});
+
+app.intent('small talk mode', conv =>{
+    if (conv.data.smallTalk){
+      return conv.add("이미 대화 모드입니다.");  
+    }
+    conv.data.smallTalk=true;
+    conv.add("대화 모드로 변경합니다.")
+});
+
+app.intent('command mode', conv =>{
+    if (!conv.data.smallTalk){
+      return conv.add("이미 명령 모드입니다.")
+    }
+    conv.data.smallTalk=undefined;
+    conv.add("명령 모드로 변경합니다.");
 });
 
 
@@ -276,13 +342,9 @@ function decisionForRecommend(activities){
     if(Increment < RecommendThreshhold){
       return true;
     }
-    else{
-      return false;
-    }
-  }
-  else{
     return false;
   }
+  return false;
 }
 
 function recommendExerciseVideo(conv){
@@ -295,7 +357,7 @@ function recommendExerciseVideo(conv){
     conv.ask('현재 장치에선 운동 영상을 보여드릴 수 없습니다. 안드로이드 모와 앱을 이용해주세요.');
     return;
   }
-
+  conv.add("다음 영상을 시청해주세요!");
   return new Promise((resolve,reject)=>{
       
     request.get({uri:youtubeURL}).then(result=>{
@@ -307,7 +369,7 @@ function recommendExerciseVideo(conv){
       const videoId=videoArray[targetIndex].snippet.resourceId.videoId;
       const videoName=videoArray[targetIndex].snippet.title;
       const channelName=videoArray[targetIndex].snippet.videoOwnerChannelTitle;
-      const videoThumbnailsURL=videoArray[targetIndex].snippet.thumbnails.high.url;
+      const videoThumbnailsURL=videoArray[targetIndex].snippet.thumbnails.standard.url;
 
       console.log(`target index=${targetIndex}, videoId=${videoId} channelName=${channelName}, thumbnailsURL==${videoThumbnailsURL}`);
 
@@ -427,4 +489,51 @@ function toggleSecurityMode(userId,information,flag){
 
 }
 
+async function getRespondeFromOpenAI(question){
+   let translated=await translate("ko","en",question);
+   console.log("question:",translated);
+   const respond= await openai.createCompletion({
+        model: "text-davinci-003",
+        prompt : translated,
+        temperature:0.7,
+        max_tokens: 1024,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty : 0
+      });
+      let text=respond.data.choices[0].text.toString();
+      text=text.replace(/\n/g, "");
+      text=text.replace("+","");
+      text=await translate("en","ko",text);
+      console.log("af text:",text);
+      return text;
+}
+
+
+function translate(source,target,text){
+  const options={
+    url : process.env.PAPAGO_URL,
+    method: "POST",
+    form : {
+      source : source,
+      target : target,
+      text : text
+    },
+    headers : {
+      "X-Naver-Client-Id" : process.env.PAPAGO_CLIENT_ID,
+      "X-Naver-Client-Secret" : process.env.PAPAGO_SECRET_KEY
+    }
+  };
+  return new Promise((resolve, reject)=>{
+    request(options).then((result)=>{
+      console.log("result:",result);
+      const data=JSON.parse(result);
+      resolve(data.message.result.translatedText);
+    }).catch((error)=>{
+      console.log("error:",error);
+      reject(false);
+    })
+  });
+}
+ 
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest(app);
