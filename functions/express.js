@@ -30,13 +30,13 @@ webApp.get("/",(req,res)=>{
     //account linking check
     console.log("url:",req.url);
     const query=url.parse(req.url,true).query;
-    //console.log("state:",STATE);    
-    console.log("query:",query);
-    STATE=query.state;
-    console.log("state:",STATE);    
-    
+    let {client_id, state, redirect_uri,  } = query;    
 
-     res.sendFile(__dirname + "/views/login.html");
+    if(client_id === CLIENT_ID || state || redirect_uri === DIALOGFLOW_REDIRECT_URL ){
+        STATE=state;  
+        return res.sendFile(__dirname + "/views/login.html");
+    }
+    return res.status(401).send('You should make a login request from dialogflow.');
  });
  
  webApp.get("/auth/google",(req,res)=>{
@@ -46,15 +46,11 @@ webApp.get("/",(req,res)=>{
  webApp.get("/auth/handler",(req,res)=>{
     const query=url.parse(req.url,true).query;
     const redirect_uri=`${DIALOGFLOW_REDIRECT_URL}?code=${query.code}&state=${STATE}`;
-    console.log("url:",req.url);
-    console.log(`code:${query.code} state:${STATE}`);
-    console.log("redirect url:",redirect_uri);
     return res.redirect(redirect_uri);
  });
 
  webApp.post("/auth/handler", async (req,res)=>{
     const query=url.parse(req.url,true).query;
-    console.log("request body:",req.body);
     const {grant_type,code,redirect_uri,client_id,client_secret,refresh_token} = req.body;
     if(grant_type==="authorization_code"){
         //access token exchange
@@ -80,16 +76,10 @@ webApp.get("/",(req,res)=>{
     }
     else{
         //error
-        res.send("Invalid Access");
+        res.status(401).send("Invalid Access");
     }
    
  }); 
-
-
- webApp.get('/auth/unlinking',(req,res)=>{
-     return res.send(401);
- });
-
 
 
 function getAccessToken(code,client_id,client_secret,redirect_uri,grant_type){

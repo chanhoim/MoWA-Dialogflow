@@ -302,6 +302,7 @@ app.intent('emergency - situation', async (conv,params)=>{
       const m_situation=params.situation;
       return await sendMessage(conv,m_name,m_situation)
     case "linked" :
+      const access_token=conv.user.raw.accessToken;
       const profile = await getGoogleProfile(access_token);
       const name=profile.name;
       const situation=conv.input.raw;
@@ -453,7 +454,7 @@ app.intent('upcoming events', async (conv)=>{
   
   let upcomingEvents= await filteringEvnets(events)
   if(upcomingEvents.length === 0) {
-    return ("일주일 안으로 다가오는 일정이 없습니다.");
+    return conv.add("일주일 안으로 다가오는 일정이 없습니다.");
   }
   conv.add("다가오는 일정은 다음과 같습니다. \n");
   const tts=await EventsTTS(upcomingEvents);
@@ -669,43 +670,6 @@ function toggleSecurityMode(userId,information,flag){
 }
 
 
-/*   openai library error?
-function getRespondeFromOpenAI(question, conv){
-  conv.data.conversation+=`USER: ${question}\n`;
-  const messages=[
-    {"role" : "system" , "content" : "You are assistant that helping the elders living alone." },
-    {"role" : "user" , "content" : conv.data.conversation}
-  ]
-  
-  return new Promise((resolve,reject)=>{
-
-    
-
-    openai.createChatCompletion({
-      model: "gpt-3.5-turbo",  
-      messages ,
-      // prompt : question,
-     // temperature:0.7,
-     // max_tokens: 4096,
-     // top_p: 1,
-     // frequency_penalty: 0,
-     // presence_penalty : 0
-    }).then(result=>{
-        console.log("chatCompletion result: ",result);
-        console.log("text:",result.data.choices[0].content);
-        //let text=result.data.choices[0].text.toString();
-        //text=text.replace(/\n/g, "");
-        //text=text.replace("+","");
-        //conv.data.conversation+= `AI : ${text}\n`;
-        //console.log("갱신된 대화내역:"+ conv.data.conversation);
-        resolve("test");
-      }).catch(error=>{
-        console.log("error:",error);
-        reject(false);
-      });
-  });
-}
-*/
 
 
 
@@ -737,10 +701,11 @@ function translate(source,target,text){
   });
 }
 
+
 function getAnswer(conv, message){
   if(!conv.data.conversation){
     conv.data.conversation=[
-      {"role" : "system" , "content" : "You are assistant that helping the elders living alone." },
+      {"role" : "system" , "content" : "Your Name is MoWA and You are assistant that helping the elders living alone." },
     ]
   }
   let conversation=conv.data.conversation;
