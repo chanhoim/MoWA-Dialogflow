@@ -26,7 +26,8 @@ Users can run the Dialogflow App with "Talk to MoWA" from a Google AI speaker  i
 ## 2. System Architecture 
 
 <br/>
-![MoWA_Dialogflow_Architecture](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/10d93048-3159-4ca1-b4be-a767466fe2c2)
+
+![MoWA_Dialogflow_Architecture](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/10d93048-3159-4ca1-b4be-a767466fe2c2) 
 <br/>
 Please refer to the image above for system architecture.
 
@@ -34,6 +35,7 @@ The user runs the Dialogflow app from the Google Assistant installed on Raspberr
 This Dialogflow App requires setup from the [Dialogflow console]((https://dialogflow.cloud.google.com/)). The developer have to create an Agent in the console and define the intents within the Agent to trigger the action.
 
 <br/>
+
 ![Dialogflow_Console_Example1](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/ad53834e-b5fa-4ca7-814b-588c04792f7d)
 ![Dialogflow_Console_Example2](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/b7ac53ce-2ff8-463c-98e4-1d7bc1254377)
 <br/>
@@ -42,12 +44,14 @@ As in the image above, you can register the intent by entering the intent name ,
 Static responses are simple text-oriented, so fullfillment should be used for more diverse responses. Fulfillment is a service, app, feed, conversation, or other logic that can response user requests.This is implemented through Webhook. In our project, We chose Firebase Clound Functions. The functions were written on Node.js and  [action on google nodejs library](https://github.com/actions-on-google/actions-on-google-nodejs) was used.
 
 <br/>
+
 ![Dialogflow_Fulfillment_Example](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/33056b31-877c-45f0-82bc-feec776958d7)
 <br/>
 As in the image above, you can write your own responses to the intents registered in the Dialogflow console. This allows you to communicate with external APIs (Google Calendar API, YouTube API, MoWA API,  .. etc) and Database as you needed. If an error occurs during the webhook process, a static response of the dialogflow console is sended.
 
 
 <br/>
+
 ![Diaglogflow_Account_Linking](https://developers.google.com/static/assistant/df-asdk/identity/images/oauth-authorization-flow.png)
 <br/>
 
@@ -144,8 +148,8 @@ The Dialogflow App is available on the Raspberry Pi Google Assistant, test page 
   
 ## 6. Reference
 <br/>
-Google Assistant on Raspberry Pi: https://github.com/shivasiddharth/GassistPi
-Dialogflow Account Linking : https://developers.google.com/assistant/df-asdk/identity
+Google Assistant on Raspberry Pi: https://github.com/shivasiddharth/GassistPi <br/> 
+Dialogflow Account Linking : https://developers.google.com/assistant/df-asdk/identity <br/> 
 Dialogflow Fulfillment Deploy: https://developers.google.com/assistant/df-asdk/deploy-fulfillment
 
  
