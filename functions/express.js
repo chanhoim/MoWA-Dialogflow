@@ -1,15 +1,22 @@
+'use strict';
+
+/**
+ * Dialogflow의 Accout Linking을 수행하는 express app입니다. account linking method 중 Oauth Linking 방식을 택하였고, 이를 위해 login endpoint와
+ * token exchange endpoint를 구현하였습니다. 
+ */
+
 const express = require('express');
 const request = require('request-promise-native');
 const bodyParser = require('body-parser');
 const url = require('url');
 require('dotenv').config();
+
 const webApp=express();
 
 webApp.use(bodyParser.json());
 webApp.use('/views',express.static(__dirname + "/views"));
 
 const CLIENT_ID=process.env.WEB_CLIENT_ID;
-const CLIENT_SECRET=process.env.WEB_CLIENT_SECRET;
 const AUTHORIZE_URI=process.env.AUTHORIZE_URI;
 const REDIRECT_URL=process.env.REDIRECT_URL;
 const SCOPE="https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid+https://www.googleapis.com/auth/calendar";

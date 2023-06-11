@@ -1,43 +1,67 @@
 'use strict';
 
 
-const {dialogflow,SignIn,Suggestions, BasicCard, Button, Image, Conversation} = require('actions-on-google');
-const {Configuration, OpenAIApi} = require('openai');
-const admin = require('firebase-admin');
+const {dialogflow,SignIn,Suggestions, BasicCard, Button, DialogflowConversation} = require('actions-on-google');
+const {updateUserToDB,getAccessTokenFromDB,getFirstResponder} = require('./firebase');
+const {getGoogleProfile,recommendExerciseVideo,convertISOtimeFormat,getEventsFromCalender,postEventToCalender,filteringEvents,EventsTTS} = require('./google');
+const {getUserInformaiton,getUserActivity,decisionForRecommend,toggleSecurityMode,getUserFallingCount,checkFallingDetection} = require('./mowa');
+const {getAnswer} = require('./openai');
+const {sendMessage} = require('./sns');
 const functions = require('firebase-functions');
-const request = require('request-promise-native');
-const CryptoJS = require('crypto-js');
 require("dotenv").config();
 
-const mowaURL=process.env.MOWA_URL;
-const RecommendThreshhold=10;
-
-const configuration=new Configuration({
-  apiKey: process.env.OPENAI_API_KEY
-});
-const openai=new OpenAIApi(configuration);
 
 const app = dialogflow({
     clientId: process.env.DIALOGFLOW_CLIENT_ID,
     debug: true});
 
+
 const webApp = require("./express");
-const { log } = require('firebase-functions/logger');
 
 
 
-
-
-
-
-app.middleware( (conv) =>{   
+/**
+ * Middlewate에선 사용자의 status와 mode를 우선적으로 구분합니다. statue는 Mobile, Guest, Linked, Expired가 있으며 Mode는 Conversation과 Command 모드가 있습니다.
+ * 추가적으로 Fall Detection을 위해 사용자의 넘어짐 횟수 정보도 갱신합니다.
+ */
+app.middleware( async (conv) =>{   
   conv.data.mode= conv.data.smallTalk?"Conversation":"Command";
+  const {status} = conv.data;
   if (fromAndroid(conv)===true){
     conv.data.status="mobile";
+  }
+  if(status === "linked"){
+    const access_token=conv.user.raw.accessToken;
+    let {userId} = conv.data;
+    try {
+      userId || await getGoogleProfile(access_token).email;
+    }catch(e){
+      conv.data.status="expired";
+      return ;
+    };
+    let fall_count
+    try{
+      fall_count = await getUserFallingCount(id);
+    } catch(e){
+      return ; 
+    }
+    if(conv.data.fallingCount === undefined){
+      conv.data.fallingCount = fall_count;
+      return ;
+    } 
+    if(fall_count !== undefined){
+       conv.data.fallingDetection = (conv.data.fallingCount < fall_count)?true:false;
+       conv.data.fallingCount=fall_count;
+       return ;
+    }
   }
 });
 
 
+/**
+ * 모와한테 말하기로 Dialogflow App이 시작될 때 실행되는 intent입니다. 사용자의 status를 정의하고, 
+ * 사용자가 로그인 되어 있다면, 활동 정보를 토대로 운동영상을 추천해주기도 합니다.
+ */
 app.intent('Default Welcome Intent', async (conv) => {
   if(fromAndroid(conv)===true){
     const request=conv.request
@@ -55,11 +79,14 @@ app.intent('Default Welcome Intent', async (conv) => {
     try {
       profile = await getGoogleProfile(access_token);
     }catch(e){
-      //토큰 만료. 
       conv.data.status="expired";
       return conv.add("현재 로그인 세션이 만료되었습니다. 로그아웃 해주세요.");
     };
+    conv.data.fallingDetection=false;
     conv.data.status="linked";
+    conv.data.userName=profile.name;
+    conv.data.userId = profile.email;
+    await updateUserToDB(conv);
     conv.add(`환영합니다. ${profile.name}님. 모와입니다. `);
     if(!conv.screen){
       return;
@@ -86,6 +113,9 @@ app.intent('Default Welcome Intent', async (conv) => {
   }
 });
 
+/**
+ * Account Linking Flow을 시작하는 Intent입니다.
+ */
 app.intent('sign in', async (conv, signin)=>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
@@ -96,11 +126,15 @@ app.intent('sign in', async (conv, signin)=>{
       return conv.add("현재 로그인 세션이 만료되었습니다. 로그아웃 해주세요.");
     case "mobile" :
     case "linked" :
-      return conv.add("이미 로그인되어 있습니다.");
+      conv.add("이미 로그인되어 있습니다.");
+      return checkFallingDetection(conv);
   }
-
 });
 
+
+/**
+ * Account Linking Flow를 동의하고, 로그인을 진행한 후 실행되는 intent입니다.
+ */
 app.intent('sign in - yes', async (conv,params,signin)=>{
   const access_token=conv.user.raw.accessToken;
   if(signin.status!=='OK'){
@@ -115,36 +149,30 @@ app.intent('sign in - yes', async (conv,params,signin)=>{
   } 
   const profile = await getGoogleProfile(access_token);
   conv.data.status="linked";
+  conv.data.fallingDetection=false;
+  conv.data.userName=profile.name;
+  conv.data.userId = profile.email;
+  await updateUserToDB(conv);
   conv.add(`환영합니다. ${profile.name}님.`);
 });
 
+/**
+ * Account Linking Flow를 시작하지 않습니다.
+ */
 app.intent('sign in - no',conv=>{
   conv.add('로그인을 수행하지 않습니다.');
 });
 
+
 app.intent('test', async conv=>{
-  const {status, mode} = conv.data;
-
-
-  /*const result = await openai.createChatCompletion({
-    model : "gpt-3.5-turbo",
-    messages : [{
-      role : "user",
-      content : "Hello" 
-    }]
-  });*/
-  const result = await getAnswer(conv,"hello");
-  return conv.add(`${result}`);
-  
-
-  //const test= await translate("en","ko",await getRespondeFromOpenAI("I have a headache."));
-  //console.log("test:",test);
-  //conv.add(`테스트 성공, ${test}`);
+   conv.add("테스트용 Intent입니다.");
+   checkFallingDetection(conv);
 });
 
 
-
-
+/**
+ * 사용자의 프로필을 보여줍니다.
+ */
 app.intent('show profile', async (conv)=>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
@@ -156,24 +184,31 @@ app.intent('show profile', async (conv)=>{
       conv.add("현재 로그인 세션이 만료되었습니다. 로그아웃 해주세요.");
       return conv.add(new Suggestions("로그아웃"));
     case "mobile" :
-      const request=conv.request;
-      return conv.add(`회원님의 이름은 ${request.name}, 이메일은 ${request.email}입니다.`);
+      const {name, email}=conv.request;
+      //활동 정보
+      conv.add(`회원님의 이름은 ${name}, ID는 ${email}입니다.`);
+      return checkFallingDetection(conv);
     case "linked" :
-      const access_token=conv.user.raw.accessToken;
-      const profile = await getGoogleProfile(access_token);
-      return conv.add(`회원님의 이름은 ${profile.name}, 이메일은 ${profile.email} 입니다.`);
-  }
+      const {userName, userId} = conv.data;
+      conv.add(`회원님의 이름은 ${userName}, ID는 ${userId} 입니다.`);
+      return checkFallingDetection(conv);
+    }
 });
 
 
-
+/**
+ * 사용자의 입력이 어떠한 intent와도 매칭되지 않을 때 실행되는 Intent입니다.
+ */
 app.intent('Default Fallback Intent', async (conv)=>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
   conv.add("오류가 발생했습니다.");
+  return checkFallingDetection(conv);
 });
 
-
+/**
+ * 사용자의 보안모드를 끕니다.
+ */
 app.intent('security off', async (conv)=>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
@@ -188,27 +223,30 @@ app.intent('security off', async (conv)=>{
       const m_id=conv.request.email;
       const m_information=await getUserInformaiton(m_id);
       if(await toggleSecurityMode(m_id,m_information,"False")){
-        return conv.add("보안 모드가 꺼졌습니다.")
+        conv.add("보안 모드가 꺼졌습니다.")
       }
       else{
-        return conv.add("오류가 발생했습니다.")
+        conv.add("오류가 발생했습니다.")
       }
+      return checkFallingDetection(conv);
     case "linked" :
-      const access_token=conv.user.raw.accessToken;
-      const profile = await getGoogleProfile(access_token);
-      const id=profile.email;
-      const information=await getUserInformaiton(id);
-      if(await toggleSecurityMode(id,information,"False")){
-        return conv.add("보안 모드가 꺼졌습니다.")
+      const {userId}=conv.data;
+      const information=await getUserInformaiton(userId);
+      if(await toggleSecurityMode(userId,information,"False")){
+        conv.add("보안 모드가 꺼졌습니다.")
       }
       else{
-        return conv.add("오류가 발생했습니다.")
+        conv.add("오류가 발생했습니다.")
       }
+      return checkFallingDetection(conv);
   }
 
 });
 
 
+/**
+ * 사용자의 보안 모드를 켭니다.
+ */
 app.intent('security on',async (conv)=>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
@@ -223,25 +261,28 @@ app.intent('security on',async (conv)=>{
       const m_id=conv.request.email;
       const m_information=await getUserInformaiton(m_id);
       if(await toggleSecurityMode(m_id,m_information,"True")){
-        return conv.add("보안 모드가 켜졌습니다.")
+        conv.add("보안 모드가 켜졌습니다.")
       }
       else{
-        return conv.add("오류가 발생했습니다.")
+        conv.add("오류가 발생했습니다.")
       }
+      return checkFallingDetection(conv);
     case "linked" :
-      const access_token=conv.user.raw.accessToken;
-      const profile = await getGoogleProfile(access_token);
-      const id=profile.email;
-      const information=await getUserInformaiton(id);
-      if(await toggleSecurityMode(id,information,"True")){
-        return conv.add("보안 모드가 켜졌습니다.")
+      const {userId}=conv.data;
+      const information=await getUserInformaiton(userId);
+      if(await toggleSecurityMode(userId,information,"True")){
+        conv.add("보안 모드가 켜졌습니다.")
       }
       else{
-        return conv.add("오류가 발생했습니다.")
+        conv.add("오류가 발생했습니다.")
       }
+      return checkFallingDetection(conv);
   }
 });
 
+/**
+ * 사용자의 Account Linking을 끕니다. refresh token까지 만료되었을 때 로그아웃이 필요합니다.
+ */
 app.intent('logout',  conv =>{
 
   const {status, mode} = conv.data;
@@ -259,6 +300,8 @@ app.intent('logout',  conv =>{
       }
       conv.add("로그아웃은 위 링크로 들어가 모와 앱의 접근 권한을 해제하시면 됩니다.");
       conv.data.status="guest";
+      conv.data.userName=undefined;
+      conv.data.userId=undefined;
       return conv.ask(new BasicCard({
         text: `로그아웃`, 
         buttons: new Button({
@@ -271,8 +314,26 @@ app.intent('logout',  conv =>{
   });
 
 
-  
 
+app.intent('MoWA', conv=>{
+  const {status, mode} = conv.data;
+  if(mode==="Conversation") return conv.followup('chatGPT');
+  switch (status) {
+    case "guest" :
+    case "expired" :
+      return conv.add("네. 안녕하세요");
+    case "mobile" :
+    case "linked" :
+      conv.ask("네. 모와입니다. 어떻게 도와드릴까요?");
+      return checkFallingDetection(conv);
+  }
+});
+
+
+  
+/**
+ * 비상 상황을 전달하기 위한 intent입니다. 사용자가 온전히 로그인되어 있다면 사용자의 현재 상황을 물어봅니다.
+ */
 app.intent('emergency', conv=>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
@@ -287,29 +348,40 @@ app.intent('emergency', conv=>{
       return conv.close();
     case "mobile" :
     case "linked" :
-     return conv.ask("현재 상황을 말씀해주세요.");
-
+      return conv.ask("현재 상황을 말씀해주세요.");
   }
 
 });
 
+/**
+ * 사용자의 비상연락처를 DB에서 읽고, 사용자가 전달한 상황을 메세지로 전송해줍니다.
+ */
 app.intent('emergency - situation', async (conv,params)=>{
 
   const {status, mode} = conv.data;
+  const firstResponder = await getFirstResponder(conv);
+  if(!firstResponder){
+    return conv.add("현재 비상연락처의 등록된 번호가 없습니다. 안드로이드 모와 앱에서 비상 연락처를 등록해주세요.");
+  }
   switch (status) {
     case "mobile" :
-      const m_name=conv.request.name;
+      const { name:m_name}=conv.request;
       const m_situation=params.situation;
-      return await sendMessage(conv,m_name,m_situation)
+      const m_result= await sendMessage(`${m_name}님으로부터 긴급 연락이 도착했습니다.\n 현재 상황:${m_situation}`, firstResponder);
+      return m_result ? conv.add("비상 연락처로 상황을 전달했습니다.") : conv.add("오류가 발생했습니다.");
+      
+        
     case "linked" :
-      const access_token=conv.user.raw.accessToken;
-      const profile = await getGoogleProfile(access_token);
-      const name=profile.name;
+      const {userName}=conv.data;
       const situation=conv.input.raw;
-      return await sendMessage(conv,name,situation)
+      const result = await sendMessage(`${userName}님으로부터 긴급 연락이 도착했습니다.\n 현재 상황:${situation}`,firstResponder)
+      return result ? conv.add("비상 연락처로 상황을 전달했습니다.") : conv.add("오류가 발생했습니다.");
   }
 });
 
+/**
+ * 사용자에게 운동 영상을 추천해줍니다.
+ */
 app.intent('recommend video', async conv=>{
 
   const {status, mode} = conv.data;
@@ -323,12 +395,16 @@ app.intent('recommend video', async conv=>{
       return conv.add(new Suggestions("로그아웃"));
     case "mobile" :
     case "linked" :
-     return await recommendExerciseVideo(conv);
+     await recommendExerciseVideo(conv);
+     return checkFallingDetection(conv);
 
   }
 
 });
 
+/**
+ * 사용자의 모드를 대화모드로 변경합니다.
+ */
 app.intent('small talk mode', async conv =>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
@@ -343,12 +419,16 @@ app.intent('small talk mode', async conv =>{
     case "linked" :
       conv.data.smallTalk=true;
       console.log("대화모드 변경");
-      return conv.add("대화 모드로 변경합니다.")
+      conv.add("대화 모드로 변경합니다.");
+      return checkFallingDetection(conv);
+
   }
 });
 
 
-
+/**
+ * 사용자의 모드를 명령 모드로 변경합니다.
+ */
 app.intent('command mode', conv =>{
   const {status, mode} = conv.data;
   switch (status) {
@@ -361,9 +441,14 @@ app.intent('command mode', conv =>{
       }
       conv.data.smallTalk=undefined;
       conv.add("명령 모드로 변경합니다.");
+      return checkFallingDetection(conv);
+
   }
 });
 
+/**
+ * 구글 캘린더에 일정을 등록하기 위한 인텐트를 실행합니다. 사용자가 로그인되어 있다면, 어떤 일정을 추가할지 물어봅니다.
+ */
 app.intent('reservation event', conv=>{
   const {status, mode} = conv.data;
   if(mode==="Conversation") return conv.followup('chatGPT');
@@ -377,42 +462,53 @@ app.intent('reservation event', conv=>{
       conv.add(new Suggestions("로그아웃"));
       return conv.close();
     case "mobile" :
-      conv.add("아직 모바일에선 불가능합니다.");
-      return conv.close();
     case "linked" :
       return conv.add("어떤 일정을 추가하시겠습니까?");
   }
    
 });
 
+/**
+ * 사용자가 일정 명을 알려주면, 등록하기 위한 시간을 물어봅니다.
+ */
 app.intent('reservation event - name', (conv, params)=>{
-    console.log("params test:",params);   //params.todo
     conv.data.todo=params.todo;
-    conv.add("알겠습니다. 일정을 예약할 시간의 년, 월, 일, 시, 분을 포함하여 말해주십시오. 시각은 반드시 필요하며 이를 제외한 요소들은 생략 시 현재 시점을 기준으로 설정됩니다. ");
+    conv.add("알겠습니다. 일정을 예약할 시간의 년, 월, 일, 시, 분을 포함하여 말해주세요. 시각은 반드시 필요하며 이를 제외한 요소들은 생략 시 현재 시점을 기준으로 설정됩니다. ");
 });
 
+/**
+ * 사용자가 시간을 정상적으로 입력한다면 구글 캘린더에 일정을 등록합니다.
+ */
 app.intent('reservation event - time', async (conv, params)=>{
   if(!params.time.includes("시")){
     return conv.add("일정을 예약할 시각 정보를 받지 못했습니다. 다시 예약해주세요.");
   }
-
-  const access_token=conv.user.raw.accessToken;
-  const profile = await getGoogleProfile(access_token);
-  const id=profile.email;
+  const {status} = conv.data;
+  let access_token, userId;
+  if(status === "mobile"){
+      access_token = await getAccessTokenFromDB(conv);
+      userId = conv.request.email;
+  }
+  else{
+    access_token=conv.user.raw.accessToken;
+    userId = conv.data.userId;
+  }
+  
+    
+  const {todo}=conv.data;
+  console.log("todo:",todo);
   const startTime = await convertISOtimeFormat(params.time);
 
   let now=new Date();
   now=new Date(now.getTime()+540*60000);
   let start=new Date(startTime);
-  console.log("현재 시간은:",now);
-  console.log("예약할 시간은:",start);
   if(now.getTime()>start.getTime()){
     return conv.add("이미 지난 시간에 일정을 추가할 수 없습니다.");
   }
   
-  let result= await postEventToCalender(access_token, id, conv.data.todo , startTime);
+  let result= await postEventToCalender(access_token, userId, todo , startTime);
   if(result){
-    conv.data.todo=undefined;
+    conv.data.toDo=undefined;
     return conv.add(`일정을 예약하였습니다.`);
   }
   conv.add("오류가 발생했습니다.");
@@ -420,7 +516,9 @@ app.intent('reservation event - time', async (conv, params)=>{
 
 
 
-
+/**
+ * 대화모드 일 때, 사용자의 질문에 대한 chatGPT의 답변을 전달합니다.
+ */
 app.intent('chatGPT',async (conv, params)=>{
   const {status, mode} = conv.data;
   if(mode!=="Conversation") return conv.add("명령을 이해하지 못했어요.");
@@ -435,478 +533,91 @@ app.intent('chatGPT',async (conv, params)=>{
     case "mobile" :
     case "linked" :
       const answer = await getAnswer(conv, params.question);
-      //const question=await translate("ko","en",params.question);
-      //const answer= await translate("en","ko",await getRespondeFromOpenAI(question,conv));
       conv.add(`${answer}`);
-      //conv.add(`사용자의 질문 ${params.question}`);
-      //return conv.add("chatGPT의 답변입니다.");
+      return checkFallingDetection(conv);
 
   }
 });
 
 
+/**
+ * 구글 캘린더에 등록된 일정들 중 일주일 이내의 일정들을 가져와 가까운 순서대로 불러줍니다.
+ */
 app.intent('upcoming events', async (conv)=>{
-  const access_token=conv.user.raw.accessToken;
-  const profile = await getGoogleProfile(access_token);
-  const id=profile.email;
+  const {status, mode} = conv.data;
+  if(mode!=="Command") return conv.add("명령을 이해하지 못했어요.");
+  switch (status) {
+    case "guest" :
+      conv.add(new Suggestions("로그인"));    
+      conv.add("로그인이 필요한 기능입니다.");
+    case "expired" :
+      conv.add("현재 로그인 세션이 만료되었습니다. 로그아웃 해주세요.");
+      conv.add(new Suggestions("로그아웃"));
+    case "mobile" :
+    case "linked" :
+      let access_token,userId;
+      if(status==="mobile"){
+        access_token = await getAccessTokenFromDB(conv);
+        userId=conv.request.email;
+      }
+      else{
+        access_token=conv.user.raw.accessToken;
+        userId=conv.data.userId
+      }
+      let events = await getEventsFromCalender(access_token,userId);
+      let upcomingEvents= await filteringEvents(events)
+      if(upcomingEvents.length === 0) {
+        return conv.add("일주일 안으로 다가오는 일정이 없습니다.");
+      }
+      conv.add("다가오는 일정은 다음과 같습니다. \n");
+      const tts=await EventsTTS(upcomingEvents);
+      conv.add(`${tts}`);
+      return checkFallingDetection(conv);
+    }
+});
 
-  let events = await getEventsFromCalender(access_token,id);
-  
-  let upcomingEvents= await filteringEvnets(events)
-  if(upcomingEvents.length === 0) {
-    return conv.add("일주일 안으로 다가오는 일정이 없습니다.");
-  }
-  conv.add("다가오는 일정은 다음과 같습니다. \n");
-  const tts=await EventsTTS(upcomingEvents);
-  conv.add(`${tts}`);
+/**
+ * fall count가 증가되었을 때 사용자에게 괜찮은지 물어봅니다.
+ */
+app.intent('detect falling event', (conv) => {
+  conv.add("넘어짐이 감지되었습니다. 괜찮으십니까?");
+});
+
+/**
+ * 사용자가 괜찮다고 답하면 추가적인 작업을 하지 않습니다.
+ */
+app.intent('detect falling event - yes', (conv) => {
+  conv.add("괜찮으시다니 다행입니다.");
 });
 
 
-function getGoogleProfile(accessToken){
-  const url=`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`;
-  return new Promise((resolve,reject)=>{
-    request.get({uri:url}).then(result=>{
-      const profile=JSON.parse(result);
-      resolve(profile);
-    }).catch(error=>{
-      console.log("error:",error);
-      reject(false);
-    })
-  });
-}
+/**
+ * 사용자가 괜찮지 않다고 답하면 긴급 연락처를 통해 사용자가 넘어졌음을 메세지로 전송합니다.
+ */
+app.intent('detect falling event - no', async (conv) => {
+  const {userName} = conv.data;
+  const firstResponder = await getFirstResponder(conv);
+  if(firstResponder){
+    const result = await sendMessage(`${userName}님이 넘어졌습니다.`, firstResponder);
+    return result?conv.add("알겠습니다. 상황이 좋지 않아 비상 연락처를 통해 메세지를 전송하겠습니다."):conv.add("오류가 발생했습니다.");
+  }
+  conv.add("현재 비상연락처의 등록된 번호가 없습니다. 안드로이드 모와 앱에서 비상 연락처를 등록해주세요.");
+});
 
 
-function getUserInformaiton(userId){
-  const targetURL=mowaURL+"user/"+userId+"/";
-  return new Promise((resolve,reject)=>{      
-    request.get({uri:targetURL}).then(result=>{
-      const Informations=JSON.parse(result);
-      resolve(Informations)
-    }).catch(error=>{
-      console.log("error:",error);
-      reject(false);
-    })
-  });
-}
 
+/**
+ * 사용자의 요청이 안드로이드 MoWA App으로부터 온 것인지 확인합니다.
+ * @param {DialogflowConversation} conv 
+ * @returns {Boolean}
+ */
 function fromAndroid(conv){
   if (conv.request.from=="AndroidMoWA"){
+    console.log(conv.request);
     return true;
   }
   else return false;
 }
 
-function getUserActivity(userId){
-  const targetURL=mowaURL+"activity/"+userId+"/";
-  return new Promise((resolve,reject)=>{
-    request.get({uri:targetURL}).then(result=>{
-      const activities=JSON.parse(result);
-      /*
-      for(let i in activities){
-        console.log("activity:",activities[i]);
-      }*/
-      resolve(activities)
-    }).catch(error=>{
-      console.log("error:",error);
-      reject(false);
-    })
-  });
-}
-
-function decisionForRecommend(activities){
-  const todayInd=activities.length-1;
-  const todaysActivityCount=activities[todayInd].activity_count;
-  if(todayInd>0){
-    const yesterdayActivityCount=activities[todayInd-1].activity_count;
-    const Increment=todaysActivityCount-yesterdayActivityCount;
-    if(Increment < RecommendThreshhold){
-      return true;
-    }
-    return false;
-  }
-  return false;
-}
-
-function recommendExerciseVideo(conv){
-  const PLAYLIST_ID=process.env.MOWA_YOUTUBE_LIST_ID;
-  const API_KEY=process.env.YOUTUBE_API_KEY;
-  const youtubeURL="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&status=&playlistId="+PLAYLIST_ID+"&key="+API_KEY;
-
-
-  if (!conv.screen && fromAndroid(conv)===false) {
-    conv.ask('현재 장치에선 운동 영상을 보여드릴 수 없습니다. 안드로이드 모와 앱을 이용해주세요.');
-    return;
-  }
-  conv.add("다음 영상을 시청해주세요!");
-  return new Promise((resolve,reject)=>{
-      
-    request.get({uri:youtubeURL}).then(result=>{
-      const parsed=JSON.parse(result);
-      const videoArray=parsed.items;
-      const videoCounts=parsed.pageInfo.totalResults;
-      const targetIndex=Math.floor(Math.random()*(videoCounts-1));
-
-      const videoId=videoArray[targetIndex].snippet.resourceId.videoId;
-      const videoName=videoArray[targetIndex].snippet.title;
-      const channelName=videoArray[targetIndex].snippet.videoOwnerChannelTitle;
-      const videoThumbnailsURL=videoArray[targetIndex].snippet.thumbnails.standard.url;
-
-      console.log(`target index=${targetIndex}, videoId=${videoId} channelName=${channelName}, thumbnailsURL==${videoThumbnailsURL}`);
-
-      const videoURL="https://www.youtube.com/watch?v="+videoId;
-   
-      conv.ask(new BasicCard({
-        subtitle: channelName,
-        title: videoName,
-        buttons: new Button({
-          title: '시청하기',
-          url: videoURL,
-        }),
-        image: new Image({
-          url: videoThumbnailsURL,
-        }),
-        display: 'CROPPED',
-      }));
-
-      //parsing  -> Basic Card Response
-
-
-
-      resolve(true)
-    }).catch(error=>{
-      console.log("error:",error);
-      conv.add("오류가 발생했습니다.")
-      reject(false);
-    });
-
-  });
-
-}
-
-function sendMessage(conv,userName,userSituation){
-  const date=Date.now().toString();
-
-  const recipientNumber=process.env.RECIPIENT_TEST_PHONE_NUMBER;
-  const senderNumber=process.env.SENDER_TEST_PHONE_NUMBER;
-
-  const serviceId=process.env.NCP_SERVICE_ID;
-  const secretKey=process.env.NCP_SECRET_KEY;
-  const accessKey=process.env.NCP_ACCESS_KEY;
-
-  const apiURL=`https://sens.apigw.ntruss.com/sms/v2/services/${serviceId}/messages`;
-  const apiURL2=`/sms/v2/services/${serviceId}/messages`;
-  const method = "POST";
-  const space = " ";
-  const newLine = "\n";
-  
-  const hmac=CryptoJS.algo.HMAC.create(CryptoJS.algo.SHA256, secretKey);
-  hmac.update(method);
-  hmac.update(space);
-  hmac.update(apiURL2);
-  hmac.update(newLine);
-  hmac.update(date);
-  hmac.update(newLine);
-  hmac.update(accessKey);
-  const hash = hmac.finalize();
-  const signature = hash.toString(CryptoJS.enc.Base64);
-
-  return new Promise((resolve,reject)=>{
-    request({
-      method: method,
-      json: true,
-      uri:apiURL,
-      headers:{
-        "Content-type": "application/json; charset=utf-8",
-        "x-ncp-iam-access-key": accessKey,
-        "x-ncp-apigw-timestamp": date,
-        "x-ncp-apigw-signature-v2": signature,
-      },
-      body:{
-        type: "SMS",
-        countryCode: "82",
-        from: senderNumber,
-        content: `${userName}님으로부터 긴급 연락이 도착했습니다.\n 현재 상황:${userSituation}`,
-        messages: [
-          { to: `${recipientNumber}`, },],
-      }
-    }).then(result=>{
-      console.log(result);
-      conv.add("긴급 요청을 전송했습니다.");
-      resolve(true);
-    }).catch(error=>{
-      console.log(error);
-      conv.add("오류가 발생했습니다.");
-      reject(false);
-    });
-  });  
-
-}
- 
-
-function toggleSecurityMode(userId,information,flag){
-  const targetURL=mowaURL+"user/"+userId+"/";
-  const option={
-      uri:targetURL,
-      method:'PUT',
-      body:{
-        "user_id" : information.user_id,
-        "serial_number" : information.serial_number,
-        "mac_address" : information.mac_address,
-        "mode" : flag,
-        "status" : information.status
-      },
-      json:true
-    }
-  return new Promise((resolve,reject)=>{
-    request(option).then(result=>{
-      resolve(true);
-      }).catch(error=>{
-      console.log(error);
-      conv.add("오류가 발생했습니다.");
-      reject(false);
-      });
-  });
-
-}
-
-
-
-
-
-function translate(source,target,text){
-  const options={
-    url : process.env.PAPAGO_URL,
-    method: "POST",
-    form : {
-      source : source,
-      target : target,
-      text : text,
-      honorific : true
-    },
-    headers : {
-      "X-NCP-APIGW-API-KEY-ID" : process.env.PAPAGO_CLIENT_ID,
-      "X-NCP-APIGW-API-KEY" : process.env.PAPAGO_SECRET_KEY,
-      "Content-Type" : "application/json"
-    }
-  };
-  return new Promise((resolve, reject)=>{
-    request(options).then((result)=>{
-      console.log("result:",result);
-      const data=JSON.parse(result);
-      resolve(data.message.result.translatedText);
-    }).catch((error)=>{
-      console.log("error:",error);
-      reject(false);
-    })
-  });
-}
-
-
-function getAnswer(conv, message){
-  if(!conv.data.conversation){
-    conv.data.conversation=[
-      {"role" : "system" , "content" : "Your Name is MoWA and You are assistant that helping the elders living alone." },
-    ]
-  }
-  let conversation=conv.data.conversation;
-  conversation.push({"role" : "user" , "content" : message})
-  const options = {
-    url : "https://api.openai.com/v1/chat/completions",
-    method : "POST",
-    json : true,
-    headers : {
-      "Content-Type" : "application/json",
-      "Authorization" : `Bearer ${process.env.OPENAI_API_KEY}`
-    },
-    body : {
-      "model" : "gpt-3.5-turbo",
-      "messages" : conversation
-    }
-  }
-  return new Promise((resolve,reject)=>{
-    request(options).then((result)=>{
-      console.log("openai api result:",result.choices[0].message);
-      let text=result.choices[0].message.content;
-      conversation.push({"role" : "assistant" , "content" : text});
-      conv.data.conversation=conversation;
-      resolve(text);
-    }).catch((error)=>{
-      console.log(error);
-      reject(false);
-    });
-  });
-}
-
-function convertISOtimeFormat(text){
-  //년 월 일 시 분  만약 생략된 부분이 있을 시 현재 기준으로.
-  const regex = /[^0-9]/g;
-  // let someString = "example 2023년 12월 23일 12시 30분"
-  let arr=text.split(" ");
-  console.log(arr);
-  let year, month, date, hours, minutes;
-
-  return new Promise((resolve,reject)=>{
-    arr.map((word)=>{
-      console.log("word=",word);
-      if(!year) {
-        word.includes("년")? year=word.replace(regex,"") : year = undefined;
-        console.log("year:",year);
-      }
-      if(!month) {
-        word.includes("월")? month=word.replace(regex,"") : month = undefined;
-        console.log("month:",month);
-      }
-      if(!date) {
-        word.includes("일")? date=word.replace(regex,"") : date = undefined
-        console.log("date:",date);
-      };
-      if(!hours) {
-        word.includes("시")? hours=word.replace(regex,"") : hours = undefined;
-        console.log("hours:",hours);
-      };
-      if(!minutes) {
-        word.includes("분")? minutes=word.replace(regex,"") :minutes = undefined;
-        console.log("minutes:",minutes);
-      }
-    });
-
-    const now= new Date();
-    year = year?year:now.getFullYear().toString();
-    month = month?month:(now.getMonth()+1).toString();
-    date = date?date:now.getDate().toString();
-    hours = hours?hours:now.getHours().toString();
-    minutes = minutes?minutes:"00";   //now.getMinutes().toString()
-
-    console.log(`중간 결과 y:${year} m:${month} d:${date} h:${hours} m:${minutes}`);
-
-    if(year.length==2) year = "20"+year;
-    if(month.length==1) month = "0"+month;
-    if(date.length==1) date = "0"+date;
-    if(hours.length==1) hours = "0"+hours;
-    if(minutes.length==1) minutes = "0"+minutes;
-
-    resolve(`${year}-${month}-${date}T${hours}:${minutes}:00`);
-  });
-
-}
-
-function getEventsFromCalender(accessToken, id){
-
-  const options= {
-    url : `https://www.googleapis.com/calendar/v3/calendars/${id}/events?access_token=${accessToken}`,
-    json : true,
-    method : "GET"
-  }
-
-  return new Promise((resolve,reject)=>{
-    request(options).then((result)=>{
-      console.log(result.items);  //array
-      resolve(result.items);
-    }).catch((error)=>{
-      console.log(error);
-      reject(false);
-    });
-  
-});
-
-
-
-
-
-}
-
-function postEventToCalender(accessToken, id, event ,startTime){
-
-  let endTime = new Date(startTime);
-  endTime =endTime.setHours(endTime.getHours()+1);
-  console.log("endTime:",endTime);
-  endTime = new Date(endTime).toISOString();
-  endTime = endTime.substring(0,endTime.length-1);
-  
-  const options = {
-    url : `https://www.googleapis.com/calendar/v3/calendars/${id}/events?access_token=${accessToken}`,
-    json: true,
-    method : "POST",
-    body : {
-      summary : event,
-      start : {
-          dateTime : startTime,
-          timeZone : "Asia/Seoul"
-      },
-      end :  {
-          dateTime : endTime,
-          timeZone : "Asia/Seoul"
-      }
-    }
-  };
-
-  return new Promise((resolve,reject)=>{
-      request(options).then((result)=>{
-        console.log(result);
-        resolve(true);
-      }).catch((error)=>{
-        console.log(error);
-        reject(false);
-      });
-    
-  });
-
-}
-
-function filteringEvnets(events){
-  let result=[];
-  let now= new Date();
-  now=new Date(now.getTime()+540*60000);
-
-
-
-
-  return new Promise((resolve, reject)=>{
-    events.forEach((eventObj)=>{
-        let eventName=eventObj.summary;
-        let startTimeDate = new Date(eventObj.start.dateTime);    //한국 기준 시간-> 서버에선 Date 객체는 utc기준, 한국 시간보다 9시간 이전 시간으로 표시된다.
-        startTimeDate=new Date(startTimeDate.getTime()+540*60000); //offset 
-        const timeDiff=now.getTime()-startTimeDate.getTime();
-        console.log("time difference msec:",timeDiff);
-        if(timeDiff>0 || timeDiff< -604800000 ){
-          //console.log("이미 지난 일정 혹은 일주일보다 오래걸리기에 통과");
-          return ;
-        }
-        const dateDiff = startTimeDate.getDate()-now.getDate();
-        const s1 = dateDiff===0?`오늘`:`${dateDiff}일 뒤 `;
-        const s2 = `${startTimeDate.getMonth()+1}월 ${startTimeDate.getDate()}일 ${startTimeDate.getHours()}시 `;
-        const s3 = startTimeDate.getMinutes()===0?`정각`:`${startTimeDate.getMinutes()}분`;
-        result.push({
-          name: eventName,
-          tts: s1+s2+s3,
-          time: startTimeDate
-        });
-    });
-    //console.log("정렬 전: ", result);
-    result.sort((e1,e2)=>{
-      if(e1.time.getTime()>e2.time.getTime()) return 1;  
-      else if (e1.time.getTime()<e2.time.getTime()) return -1;
-      return 0;
-    });
-    //console.log("정렬 후: ", result);
-
-
-    resolve(result);
-  });
-}
-
-function EventsTTS(events){
-  let result="";
-  return new Promise((resolve)=>{
-      events.forEach((event,index)=>{
-      result+=`${event.tts}  ${event.name} ${(index===(events.length-1))?"입니다.":",\n"}\n`; 
-    });
-    resolve(result);
-  });
-
-}
-
-
- 
 exports.fulfillmentExpressServer=functions.https.onRequest(webApp);
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest(app);
