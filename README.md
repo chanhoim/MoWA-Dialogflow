@@ -135,13 +135,14 @@ The Dialogflow App is available on the Raspberry Pi Google Assistant, test page 
 <br/>
 
  - Google Action Console:
- ![Dialogflow_Google_Action_Console](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/15ba8548-943b-486e-b4c7-cfc540ebf5a0)<br/>
+ ![Dialogflow_Google_Action_Console](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/238827ed-745f-4989-822e-38a7880698bb)<br/>
  - Raspberry Pi:
- ![Dialogflow_RaspberryPi_1](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/19c7a77a-541a-491d-9c62-f315a33fa9f8)
- ![Dialogflow_RaspberryPi_2](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/267badfd-9454-4582-ac80-416dc124f94a)<br/>
+ 
+ ![Dialogflow_RaspberryPi_1](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/7bf1434c-bff3-4df8-ac10-1a7f63d8d3a9)<br/>
  - Android MoWA:
  
- ![Dialogflow_MoWA_Android](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/3e920b0d-f7fe-46dc-8c40-7147f00f1b49)<br/>
+ ![Dialogflow_MoWA_Android](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/468feb62-3470-409d-8621-25a1b14087bf)
+)<br/>
 
     
  
