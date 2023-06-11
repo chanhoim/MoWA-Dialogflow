@@ -18,7 +18,7 @@
 
 <br/>
 In Project MoWA, we selected AI speakers as an auxiliary helper for users (the elderly living alone). This AI speaker is responsible for communicating with users and performing special commands. Among the various AI speaker models, we chose **Google AI speaker** that has a lot of information and is easy to install on Raspberry Pi. 
-In addition, our project selected Dialogflow so that AI speakers can perform MoWA's special commands.
+In addition, our project selected Dialogflow so that AI speakers can perform MoWA's special commands. 
 **Dialogflow** is a natural language understanding platform used to design and integrate a conversational user interface into mobile apps, web applications, devices, bots, interactive voice response systems and related uses.
 Users can run the Dialogflow App with "Talk to MoWA" from a Google AI speaker  installed on Raspberry Pi  or smartphone MoWA app  to commands or talk.
 <br/>
@@ -27,7 +27,7 @@ Users can run the Dialogflow App with "Talk to MoWA" from a Google AI speaker  i
 
 <br/>
 
-![MoWA_Dialogflow_Architecture](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/10d93048-3159-4ca1-b4be-a767466fe2c2) 
+![MoWA_Dialogflow_Architecture](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/e61fca47-76a7-4544-aa6e-9be5e72a31e5) 
 <br/>
 Please refer to the image above for system architecture.
 
@@ -36,8 +36,8 @@ This Dialogflow App requires setup from the [Dialogflow console]((https://dialog
 
 <br/>
 
-![Dialogflow_Console_Example1](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/ad53834e-b5fa-4ca7-814b-588c04792f7d)
-![Dialogflow_Console_Example2](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/b7ac53ce-2ff8-463c-98e4-1d7bc1254377)
+![Dialogflow_Console_Example1](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/27e2acee-701d-4c3a-82d3-cc797e16cf30)
+![Dialogflow_Console_Example2](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/7c218acb-1c0f-49d7-98ed-3a8594d70011)
 <br/>
 
 As in the image above, you can register the intent by entering the intent name ,training phrases and defining the response. When the user says training phrases, the agent matches the intent and send the matched intent's response to user. This method is called static response. 
@@ -45,7 +45,7 @@ Static responses are simple text-oriented, so fullfillment should be used for mo
 
 <br/>
 
-![Dialogflow_Fulfillment_Example](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/33056b31-877c-45f0-82bc-feec776958d7)
+![Dialogflow_Fulfillment_Example](https://github.com/chanhoim/MoWA-Dialogflow/assets/101717041/92a85e3d-6ef7-4d6c-ac8c-ff603b12a476)
 <br/>
 As in the image above, you can write your own responses to the intents registered in the Dialogflow console. This allows you to communicate with external APIs (Google Calendar API, YouTube API, MoWA API,  .. etc) and Database as you needed. If an error occurs during the webhook process, a static response of the dialogflow console is sended.
 
